@@ -3,11 +3,35 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <string.h>
+#include <stdarg.h>
 
 #include "ma.h"
 
 #define PARAMETER_FAILED(x) { errno = EINVAL; return x; }
-#define MEMORY_FAILED(x) { errno = ENOMEM; return x; }
+
+void MEMORY_FREE(void *ptr, ...) {
+    va_list args;
+    va_start(args, ptr);
+    
+    // check if the first argument is null (no arguments passed)
+    if (ptr != NULL) {
+        free(ptr);
+    }
+    
+    // loop through the remaining arguments
+    void *next_ptr;
+    while ((next_ptr = va_arg(args, void*)) != NULL) {
+        free(next_ptr);
+    }
+    
+    va_end(args);
+}
+
+#define MEMORY_FAILED(x, ...) { \
+    errno = ENOMEM; \
+    MEMORY_FREE(__VA_ARGS__); \
+    return x; \
+}
 
 // get ceil for division of two numbers
 static int ceil_div(size_t f, size_t s) {
@@ -39,6 +63,15 @@ static machines_array_t* new_child_machines(size_t n) {
     return array;
 }
 
+static int update_output(moore_t *machine) {
+    uint64_t *outputarray = (uint64_t*)calloc(machine->outputState.blockSize, sizeof(uint64_t));
+    if(!outputarray) MEMORY_FAILED(-1, NULL);
+    machine->outputFunction(outputarray, machine->curState.array, machine->outputState.bitsSize, machine->curState.bitsSize);
+    machine->outputState.array = outputarray;
+    return 0; // Return success or handle other cases as needed
+}
+
+
 moore_t *ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, output_function_t y, uint64_t const *q){
     // check if the parameters are correct
     if(!s || !m || !t || !y || !q) 
@@ -65,15 +98,16 @@ moore_t *ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, o
     // set cur state of machine
     newmachine->curState.array = q;
     // set output state
-    uint64_t *outputarray = (uint64_t*)calloc(newmachine->outputState.blockSize, sizeof(uint64_t));
-    if(!outputarray) MEMORY_FAILED(NULL);
-    y(outputarray, newmachine->curState.array, m, s);
-    newmachine->outputState.array = outputarray;
+    if (update_output(newmachine) < 0) {
+        MEMORY_FAILED(NULL, newmachine->inputState.array, newmachine->curState.array, newmachine->outputState.array,
+                      newmachine->parentMachines.array, newmachine->childMachines);
+    }
 
     // check for correct memory allocation
     if((!newmachine->inputState.array && n != 0) || !newmachine->curState.array || !newmachine->outputState.array ||
     !newmachine->parentMachines.array || !newmachine->childMachines) 
-        MEMORY_FAILED(NULL);
+        MEMORY_FAILED(NULL,newmachine->inputState.array, newmachine->curState.array, newmachine->outputState.array,
+        newmachine->parentMachines.array, newmachine->childMachines);
 
     return newmachine;
 }
