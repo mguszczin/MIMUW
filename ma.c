@@ -68,8 +68,25 @@ static int add_element_to_machines_array(machines_array_t *mptr, moore_t *ma) {
     return 0;
 }
 
-static int remove_element_from_machines_array(machines_array_t *mptr, moore_t *ma) {
+// swap to pointers to pointers machines
+static int swap_machines_pointers(moore_t ** a, moore_t **b) {
+    moore_t *c = *a;
+    *a = *b;
+    *b = c;
+}
 
+static int remove_element_from_machines_array(machines_array_t *mptr, moore_t *ma) {
+    int del = 0;
+    for(size_t i = 0; i < mptr->size; i++) {
+        if(ma != mptr->array[i]) continue;
+
+        mptr->array[i] = NULL;
+        del++;
+        for(size_t j = i; j < mptr->size - 1; j++) {
+            swap_machines_pointers(mptr->array[j], mptr->array[i]);
+        }
+    }
+    mptr->size -= del;
 }
 
 #define INIT_MACHINE_VALUE 0
@@ -91,11 +108,13 @@ static state_t new_state(size_t n) {
     return (state_t){.array = (uint64_t*)calloc(blocksize, sizeof(uint64_t)), .blockSize = blocksize, .bitsSize = n};
 }
 
-static int update_output(moore_t *machine) {
-    uint64_t *outputarray = (uint64_t*)calloc(machine->outputState.blockSize, sizeof(uint64_t));
+// Calc the new output and then assign it to the array machine points to 
+static int update_output(moore_t *ma) {
+    uint64_t *outputarray = (uint64_t*)calloc(ma->outputState.blockSize, sizeof(uint64_t));
     if(!outputarray) MEMORY_FAILED(-1, NULL);
-    machine->outputFunction(outputarray, machine->curState.array, machine->outputState.bitsSize, machine->curState.bitsSize);
-    machine->outputState.array = outputarray;
+    ma->outputFunction(outputarray, ma->curState.array, ma->outputState.bitsSize, ma->curState.bitsSize);
+    memcpy(ma->outputState.array, outputarray, ma->outputState.blockSize * sizeof(uint64_t));
+    free(outputarray);
     return 0; // Return success or handle other cases as needed
 }
 
@@ -125,17 +144,17 @@ moore_t *ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, o
     if(n == 0) newmachine->inputState.array = NULL;
     // set cur state of machine
     newmachine->curState.array = q;
-    // set output state
-    if (update_output(newmachine) < 0) {
-        MEMORY_FAILED(NULL, newmachine->inputState.array, newmachine->curState.array, newmachine->outputState.array,
-                      newmachine->parentMachines.array, newmachine->childMachines);
-    }
 
     // check for correct memory allocation
-    if((!newmachine->inputState.array && n != 0) || !newmachine->curState.array || !newmachine->outputState.array ||
+    if(update_output(newmachine) < 0 || (!newmachine->inputState.array && n != 0) || !newmachine->curState.array || !newmachine->outputState.array ||
     !newmachine->parentMachines.array || !newmachine->childMachines) 
-        MEMORY_FAILED(NULL,newmachine->inputState.array, newmachine->curState.array, newmachine->outputState.array,
-        newmachine->parentMachines.array, newmachine->childMachines);
+        MEMORY_FAILED(
+            NULL,
+            newmachine->inputState.array, 
+            newmachine->curState.array, 
+            newmachine->outputState.array,
+            newmachine->parentMachines.array, 
+            newmachine->childMachines);
 
     return newmachine;
 }
@@ -150,7 +169,7 @@ static void mirror_function(uint64_t *output, uint64_t const *state, size_t m , 
     memcpy(output, state, block * sizeof(uint64_t));
 }
 
-moore_t *ma_create_simple(size_t n, size_t m, transition_function_t t){
+moore_t *ma_create_simple(size_t n, size_t m, transition_function_t t) {
     // check if m == 0 - we don't want to calloc empty array
     if(m == 0) 
         PARAMETER_FAILED(NULL);
@@ -161,11 +180,15 @@ moore_t *ma_create_simple(size_t n, size_t m, transition_function_t t){
 
 /** DELETING **/
 
-void ma_delete(moore_t *a){
+void ma_delete(moore_t *a) {
 
     free(a->parentMachines.array);
     moore_t machine = *a;
     for(int i = 0; i < a->outputState.bitsSize; i++) {
+        for(size_t j = 0; j < machine.childMachines[i].size; j++) {
+            moore_t *mptr = machine.childMachines[i].array[j];
+            remove_element_from_machines_array(&mptr->parentMachines, a);
+        }
         free(machine.childMachines[i].array);
     }
     free(machine.childMachines);
@@ -177,14 +200,31 @@ void ma_delete(moore_t *a){
     free(a);
 }
 
+/** CONNECTING **/
+
+int ma_connect(moore_t *a_in, size_t in, moore_t *a_out, size_t out, size_t num) {
+    return 0;
+}
+
+int ma_disconnect(moore_t *a_in, size_t in, size_t num)
+{
+    return 0;
+}
+
 /** SETTING **/
 
-int ma_set_input(moore_t *a, uint64_t const *input)
-{
+int ma_set_input(moore_t *a, uint64_t const *input){
+    free(a->inputState.array);
+    a->inputState.array = input;
     return 0;
 }
 
-int ma_set_state(moore_t *a, uint64_t const *state)
-{
+int ma_set_state(moore_t *a, uint64_t const *state){
+    free(a->curState.array);
+    a->curState.array = NULL;
+    a->curState.array = state;
+    if(update_output(a) < 0) 
+        MEMORY_FAILED(-1, NULL);
     return 0;
 }
+

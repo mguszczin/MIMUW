@@ -13,7 +13,7 @@ typedef void (*output_function_t)(uint64_t *output, uint64_t const *state,
 // array is split into 64 blocks
 typedef struct state {  
     // bit array splited into 64 blocks
-    uint64_t const *array;
+    uint64_t *array;
     // size of blocks in array 
     size_t blockSize;
     // amount of bits the array really has
