@@ -44,21 +44,32 @@ void memory_free(void *ptr, ...) {
 /** MACHINES_ARRAY_T HANDLING **/
 
 // function generates new machines array 
-static machines_array_t new_machines_array(size_t nsize, size_t ncapacity, moore_t *prevptr) {
-    machines_array_t m = (machines_array_t){.capacity = ncapacity, .size = nsize, .array = (moore_t **)realloc(prevptr,sizeof(moore_t*) * ncapacity)};
+// if n = 0 return m.array equal to NULL
+static machines_array_t new_machines_array(size_t nsize, size_t ncapacity, machines_array_t *prevptr) {
+    moore_t ** newarray = (moore_t **)realloc(prevptr->array ,sizeof(moore_t*) * ncapacity);
+    free(prevptr->array);
+    machines_array_t m = (machines_array_t){.capacity = ncapacity, .size = nsize, .array = newarray};
     if(ncapacity == 0) m.array = NULL;
     return m;
 }
 
+// add new element to machines_array, if array to small - resize to 2x bigger 
+// uses : new_machines_array to resize
+// returns -1 if allocation went wrong else 0 
 static int add_element_to_machines_array(machines_array_t *mptr, moore_t *ma) {
-    // change capacity to 2(x + 1) if its to small 
+    // change capacity to 2*x + 1 if its to small 
     if(mptr->size >= mptr->capacity) {
-        *mptr = new_machines_array(mptr->size, (mptr->capacity + 1) * 2, mptr);                     // +1 to avoid case where capacity = 0
+        *mptr = new_machines_array(mptr->size, mptr->capacity * 2 + 1, mptr);                     // +1 to avoid case where capacity = 0
         if(mptr->array == NULL) MEMORY_FAILED(-1,NULL);
     }
     // add element 
     mptr->array[mptr->size] = ma;
+    mptr->size++;
     return 0;
+}
+
+static int remove_element_from_machines_array(machines_array_t *mptr, moore_t *ma) {
+
 }
 
 #define INIT_MACHINE_VALUE 0
@@ -66,7 +77,7 @@ static int add_element_to_machines_array(machines_array_t *mptr, moore_t *ma) {
 static machines_array_t* new_child_machines(size_t n) {
     machines_array_t *array = (machines_array_t*)malloc(sizeof(machines_array_t) * n);
     for(size_t i = 0; i < n; i++) {
-        array[i] = new_machines_array(INIT_MACHINE_VALUE, NULL);
+        array[i] = new_machines_array(INIT_MACHINE_VALUE, INIT_MACHINE_VALUE,  NULL);
     }
     return array;
 }
@@ -104,7 +115,7 @@ moore_t *ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, o
         .outputState = new_state(m),
         .transitionFunction = t,
         .outputFunction = y,
-        .parentMachines = new_machines_array(n, NULL),
+        .parentMachines = new_machines_array(n, n, NULL),
         .childMachines = new_child_machines(m)
     };
 
