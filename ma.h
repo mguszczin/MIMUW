@@ -15,9 +15,9 @@ typedef struct state {
     // bit array splited into 64 blocks
     uint64_t const *array;
     // size of blocks in array 
-    int blockSize;
+    size_t blockSize;
     // amount of bits the array really has
-    int bitsSize;
+    size_t bitsSize;
 } state_t;
 
 typedef struct moore moore_t;
@@ -25,8 +25,8 @@ typedef struct moore moore_t;
 // struct used to define machines array
 typedef struct machines_array {
     moore_t **array;
-    int size;
-    int capacity;
+    size_t size;
+    size_t capacity;
 }machines_array_t;
 
 // structure used to represent moore machine 

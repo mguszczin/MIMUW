@@ -7,9 +7,17 @@
 
 #include "ma.h"
 
+// get ceil for division of two numbers
+static size_t ceil_div(size_t f, size_t s) {
+    return (f + s - 1) / s;
+}
+
+/** ERROR HANDLING **/
+
 #define PARAMETER_FAILED(x) { errno = EINVAL; return x; }
 
-void MEMORY_FREE(void *ptr, ...) {
+// free all the pointers given as arguments
+void memory_free(void *ptr, ...) {
     va_list args;
     va_start(args, ptr);
     
@@ -29,28 +37,28 @@ void MEMORY_FREE(void *ptr, ...) {
 
 #define MEMORY_FAILED(x, ...) { \
     errno = ENOMEM; \
-    MEMORY_FREE(__VA_ARGS__); \
+    memory_free(__VA_ARGS__); \
     return x; \
 }
 
-// get ceil for division of two numbers
-static int ceil_div(size_t f, size_t s) {
-    return (f + s - 1) / s;
-}
+/** MACHINES_ARRAY_T HANDLING **/
 
-/** INITIALIZATION **/
-
-// function to initialize a new state struct
-// uses : ceil_div() to get a upper bound for size of all blocks
-static state_t new_state(size_t n) {
-    int blocksize = ceil_div(n , 64);
-    return (state_t){.array = (uint64_t*)calloc(blocksize, sizeof(uint64_t)), .blockSize = blocksize, .bitsSize = n};
-}
-
-static machines_array_t new_machines_array(size_t n, moore_t *prevptr) {
-    machines_array_t m = (machines_array_t){.capacity = n, .size = n, .array = (moore_t **)realloc(prevptr,sizeof(moore_t*) * n)};
-    if(n == 0) m.array = NULL;
+// function generates new machines array 
+static machines_array_t new_machines_array(size_t nsize, size_t ncapacity, moore_t *prevptr) {
+    machines_array_t m = (machines_array_t){.capacity = ncapacity, .size = nsize, .array = (moore_t **)realloc(prevptr,sizeof(moore_t*) * ncapacity)};
+    if(ncapacity == 0) m.array = NULL;
     return m;
+}
+
+static int add_element_to_machines_array(machines_array_t *mptr, moore_t *ma) {
+    // change capacity to 2(x + 1) if its to small 
+    if(mptr->size >= mptr->capacity) {
+        *mptr = new_machines_array(mptr->size, (mptr->capacity + 1) * 2, mptr);                     // +1 to avoid case where capacity = 0
+        if(mptr->array == NULL) MEMORY_FAILED(-1,NULL);
+    }
+    // add element 
+    mptr->array[mptr->size] = ma;
+    return 0;
 }
 
 #define INIT_MACHINE_VALUE 0
@@ -61,6 +69,15 @@ static machines_array_t* new_child_machines(size_t n) {
         array[i] = new_machines_array(INIT_MACHINE_VALUE, NULL);
     }
     return array;
+}
+
+/** INITIALIZATION **/
+
+// function to initialize a new state struct
+// uses : ceil_div() to get a upper bound for size of all blocks
+static state_t new_state(size_t n) {
+    int blocksize = ceil_div(n , 64);
+    return (state_t){.array = (uint64_t*)calloc(blocksize, sizeof(uint64_t)), .blockSize = blocksize, .bitsSize = n};
 }
 
 static int update_output(moore_t *machine) {
