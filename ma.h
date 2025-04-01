@@ -20,11 +20,16 @@ typedef struct state {
     size_t bitsSize;
 } state_t;
 
-typedef struct moore moore_t;
+typedef struct bit_location
+{
+    uint64_t *block;
+    int bitPos;
+}bit_location_t;
+
 
 // struct used to define machines array
 typedef struct machines_array {
-    moore_t **array;
+    bit_location_t *array;
     size_t size;
     size_t capacity;
 }machines_array_t;
