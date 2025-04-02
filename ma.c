@@ -19,6 +19,10 @@ static size_t ceil_div(size_t f, size_t s) {
     return (f + s - 1) / s;
 }
 
+static bool same_connect_elems(connect_elem_t a, connect_elem_t b) {
+    return a.connectedBit == b.connectedBit && a.connectedMachine == b.connectedMachine;
+}
+
 /** ERROR HANDLING **/
 
 #define PARAMETER_FAILED(x) { errno = EINVAL; return x; }
@@ -50,31 +54,34 @@ void memory_free(void *ptr, ...) {
 
 /** MACHINES_STACK HANDLING **/
 
-static void unlink_node(node_t *nodetodel, machines_stack_t *stack) {
+static void delete_node(connect_elem_t nodetodel, machines_stack_t *stack) {
     // if stack is empty we don't do anything
-    if(stack->top == NULL) {
+    node_t *curnode = stack->top, *usednode = NULL;
+    if(curnode == NULL) {
         return;
     }  
 
     // if we delete top of the we just set the top to prev (might be null)
-    if(stack->top == nodetodel) {
-        stack->top = nodetodel->prev;
+    if(same_connect_elems(curnode->element, nodetodel)) {
+        stack->top = curnode->prev;
+        free(curnode);
         return;
     }
     
     // we iterate over whole list looking for that node 
-    node_t *curnode = stack->top, *prevnode = NULL;
-    while(curnode != NULL && curnode != nodetodel) {
+    while(curnode != NULL && 
+          !same_connect_elems(curnode->element, nodetodel)) {
         node_t *ptr = curnode;
         curnode = curnode->prev;
-        prevnode = ptr;
+        usednode = ptr;
     }
 
     // if we don't find the node we simply return
     if(curnode == NULL) return;
 
     // we unlink the pointer
-    prevnode->prev = curnode->prev;
+    usednode->prev = curnode->prev;
+    free(curnode);
 }
 
 // we add node to the back of the list 
@@ -97,7 +104,7 @@ static void push_node(node_t *node, machines_stack_t *stack) {
 
 // function to initialize parents array 
 // initially we set each bit to NULL - because we don't have any parents
-static connect_elem_t *init_parent_machines(size_t n) {
+static connect_elem_t *init_parent_machines_array(size_t n) {
     if(n == 0) return EMPTY_ARRAY;
 
     connect_elem_t *parentarray = (connect_elem_t *)malloc(sizeof(connect_elem_t) * n);
@@ -108,6 +115,14 @@ static connect_elem_t *init_parent_machines(size_t n) {
     }
     
     return parentarray;
+}
+
+static connect_elem_t init_connect_elem(size_t bit, moore_t *ma) {
+    return (connect_elem_t){.connectedBit = bit, .connectedMachine = ma};
+}
+
+static node_t init_node(connect_elem_t elem) {
+    return (node_t){.element = elem, .prev = NULL};
 }
 
 // function intializes array of arrays of machines, sets every machine to be empty 
@@ -205,9 +220,36 @@ moore_t *ma_create_simple(size_t n, size_t m, transition_function_t t) {
 
 /* CONNECTING/DISCONNECTING */
 
-static int connect_machines_bits(connect_elem_t *)
+// return -1 if malloc failed else 0 
+// we connect two bits and machines together
+static int connect_machines_bits(size_t parbit, moore_t *par, size_t chilbit, moore_t *chil){
+    connect_elem_t parelem = init_connect_elem(parbit, par);
+    connect_elem_t chilelem = init_connect_elem(chilbit, chil);
 
-static int disconnect_machines_bits()
+    // we check if we add the same connection twice
+    if(same_connect_elems(chil->parentMachines[chilbit], parelem)) return 0;   
+
+    // get a pointer to a new node and initialize 
+    node_t *newnode = (node_t *)malloc(sizeof(node_t));
+    if(newnode == NULL) return -1;                  // return -1 if allocation failed
+    *newnode = init_node(chilelem);
+
+    // update parent array and add node to list
+    chil->parentMachines[chilbit] = parelem;
+    push_node(newnode, &(par->childMachines[parbit]));
+
+    return 0;
+}
+
+// function unlinks the connection between two bits
+// and frees the memory allocated on queue 
+static void disconnect_machines_bits(size_t parbit, moore_t *par, size_t chilbit, moore_t *chil){
+    connect_elem_t parelem = init_connect_elem(parbit, par);
+    connect_elem_t chilelem = init_connect_elem(chilbit, chil);
+
+    chil->parentMachines[chilbit] = EMPTY_CONNECT;
+    delete_node(chilelem, &(par->childMachines[parbit]));
+}
 
 int ma_connect(moore_t *a_in, size_t in, moore_t *a_out, size_t out, size_t num) {
     return 0;
