@@ -20,19 +20,29 @@ typedef struct state {
     size_t bitsSize;
 } state_t;
 
-typedef struct bit_location
-{
-    uint64_t *block;
-    int bitPos;
-}bit_location_t;
 
-
+typedef struct moore moore_t;
 // struct used to define machines array
-typedef struct machines_array {
-    bit_location_t *array;
-    size_t size;
-    size_t capacity;
-}machines_array_t;
+
+/* ARRAY/LIST ELEMENT DEFINITION */
+
+typedef struct connect_elem {
+    moore_t *connectedMachine;
+    size_t connectedBit;
+} connect_elem_t;
+
+/* LIST DEFINITION */
+
+typedef struct node {
+    connect_elem_t element;
+    node_t *prev;
+} node_t;
+
+typedef struct machines_stack {
+    node_t *top;
+} machines_stack_t;
+
+/* MAIN STRUCT DEFINITION */
 
 // structure used to represent moore machine 
 // uses: struct state, transition_function_t, output_function_t 
@@ -44,9 +54,9 @@ typedef struct moore {
     // function to get new output state
     output_function_t outputFunction; 
     // machines connected to our input
-    machines_array_t parentMachines;
+    connect_elem_t *parentMachines;
     // machines our output is connected to 
-    machines_array_t *childMachines;
+    machines_stack_t *childMachines;
 
 } moore_t;
 

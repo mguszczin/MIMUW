@@ -9,8 +9,10 @@
 
 #define BLOCK_SIZE 64
 
-// TO DO COSMETICS: 
-// DEF VALUE OF EMPTY ARRAY TO NULL
+#define EMPTY_ARRAY NULL 
+#define EMPTY_STACK NULL
+#define EMPTY_CONNECT (connect_elem_t){.connectedMachine = NULL, .connectedBit = -1}
+#define EMPTY_LIST (machines_stack_t){.top = NULL}
 
 // get ceil for division of two numbers
 static size_t ceil_div(size_t f, size_t s) {
@@ -46,92 +48,83 @@ void memory_free(void *ptr, ...) {
     return x; \
 }
 
-/** MACHINES_ARRAY_T HANDLING **/
+/** MACHINES_STACK HANDLING **/
 
-// function generates new machines array 
-// if n = 0 return m.array equal to NULL
-static machines_array_t new_machines_array(size_t nsize, size_t ncapacity, machines_array_t *prevptr) {
-    bit_location_t *newarray = (bit_location_t *)realloc(prevptr->array ,sizeof(bit_location_t) * ncapacity);
+static void unlink_node(node_t *nodetodel, machines_stack_t *stack) {
+    // if stack is empty we don't do anything
+    if(stack->top == NULL) {
+        return;
+    }  
 
-    machines_array_t m = (machines_array_t){.capacity = ncapacity, .size = nsize, .array = newarray};
-
-    if(ncapacity == 0) m.array = NULL;
-    return m;
-}
-
-// add new element to machines_array, if array to small - resize to 2x + 1 bigger 
-// uses : new_machines_array to resize
-// returns -1 if allocation went wrong else 0 
-static int add_element_to_machines_array(machines_array_t *mptr, bit_location_t ma) {
-    // change capacity to 2*x + 1 if its to small 
-    if(mptr->size >= mptr->capacity) {
-        *mptr = new_machines_array(mptr->size, mptr->capacity * 2 + 1, mptr);                     // +1 to avoid case where capacity = 0
-        if(mptr->array == NULL) MEMORY_FAILED(-1,NULL);
+    // if we delete top of the we just set the top to prev (might be null)
+    if(stack->top == nodetodel) {
+        stack->top = nodetodel->prev;
+        return;
+    }
+    
+    // we iterate over whole list looking for that node 
+    node_t *curnode = stack->top, *prevnode = NULL;
+    while(curnode != NULL && curnode != nodetodel) {
+        node_t *ptr = curnode;
+        curnode = curnode->prev;
+        prevnode = ptr;
     }
 
-    // add element 
-    mptr->array[mptr->size] = ma;
-    mptr->size++;
-    return 0;
+    // if we don't find the node we simply return
+    if(curnode == NULL) return;
+
+    // we unlink the pointer
+    prevnode->prev = curnode->prev;
 }
 
-static bool same_bit_location(bit_location_t a, bit_location_t b) {
-    return a.bitPos == b.bitPos && a.block == b.block;
-}
-
-static int remove_element_from_machines_array(machines_array_t *mptr, bit_location_t ma) {
-    for(size_t i = 0; i < mptr->size; i++) {
-        if(!same_bit_location(ma, mptr->array[i])) continue;
-
-        // move all elements to the left
-        for (size_t j = i; j < mptr->size - 1; j++) {
-            mptr->array[j] = mptr->array[j+1];
-        }
-        mptr->size--;
-        i--; // adjust i to recheck te moved element 
+// we add node to the back of the list 
+static void push_node(node_t *node, machines_stack_t *stack) {
+    // case where stack is empty
+    if(stack->top == NULL){
+        stack->top = node;
+        node->prev = NULL;  // make sure last element in stack points to null 
+        return;
     }
 
-    size_t target_capacity = mptr->size + 2;
-    if (mptr->capacity > target_capacity) {
-        *mptr = new_machines_array(mptr->size, target_capacity, mptr);
-        if(mptr->size != 0 && (mptr->array) == NULL) return -1;
-    }
-    return 0;
-
+    // if stack isn't empty  
+    node_t *prevnode = stack->top;
+    stack->top = node;
+    node->prev = prevnode;
 }
+
 
 /** INITIALIZATION **/
 
-#define EMPTY_MACHINE_ARRAY (machines_array_t){.size =0, .capacity = 0, .array = NULL}
-
 // function to initialize parents array 
-// initially each bit chooses itself as parent 
-static machines_array_t init_parent_machines(size_t n, moore_t *newmachine) {
-    if(n == 0) return EMPTY_MACHINE_ARRAY;
+// initially we set each bit to NULL - because we don't have any parents
+static connect_elem_t *init_parent_machines(size_t n) {
+    if(n == 0) return EMPTY_ARRAY;
 
-    machines_array_t m = (machines_array_t){.capacity = n, .size = n, .array = (bit_location_t *)malloc(sizeof(bit_location_t) * n)};
-    
-    if(m.array == NULL) return m;           // if array points to null we are done 
+    connect_elem_t *parentarray = (connect_elem_t *)malloc(sizeof(connect_elem_t) * n);
+    if(parentarray == NULL) return EMPTY_ARRAY;
 
     for(size_t i = 0; i < n; i++) {
-        int blind = ceil_div(i, BLOCK_SIZE);        // get block index 
-        int indinside = i % BLOCK_SIZE;             // get index inside block
-        m.array[i] = (bit_location_t){.block = newmachine->inputState.array[blind], indinside};
+        parentarray[i] = EMPTY_CONNECT;
     }
+    
+    return parentarray;
 }
 
 // function intializes array of arrays of machines, sets every machine to be empty 
-static machines_array_t* init_child_machines(size_t n) {
-    machines_array_t *array = (machines_array_t*)malloc(sizeof(machines_array_t) * n);
-    for(size_t i = 0; i < n; i++) {
-        array[i] = EMPTY_MACHINE_ARRAY;
+static machines_stack_t* init_child_machines(size_t m) {
+    machines_stack_t *childarray = (machines_stack_t *)malloc(sizeof(machines_stack_t) * m);
+    if(childarray == NULL) return EMPTY_ARRAY;
+
+    for(size_t i = 0; i < m; i++) {
+        childarray[i] = EMPTY_LIST;
     }
-    return array;
+
+    return childarray;
 }
 
 // function to initialize a new state struct
 // uses : ceil_div() to get a upper bound for size of all blocks
-static state_t new_state(size_t n) {
+static state_t init_state(size_t n) {
     int blocksize = ceil_div(n , BLOCK_SIZE);
     return (state_t){.array = (uint64_t*)calloc(blocksize, sizeof(uint64_t)), .blockSize = blocksize, .bitsSize = n};
 }
@@ -148,7 +141,6 @@ static int get_new_output(moore_t *ma) {
     return 0; // Return success or handle other cases as needed
 }
 
-
 moore_t *ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, output_function_t y, uint64_t const *q){
     // check if the parameters are correct
     if(!s || !m || !t || !y || !q) 
@@ -159,14 +151,15 @@ moore_t *ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, o
     
     // define a new machine
     *newmachine = (moore_t){
-        .inputState = new_state(n),         // set state of input for n 
-        .curState = new_state(s),           // set state of current state for s
-        .outputState = new_state(m),        // set state of output for m
-        .transitionFunction = t,            // set both functions
-        .outputFunction = y
+        .inputState = init_state(n),                // set state of input for n 
+        .curState = init_state(s),                  // set state of current state for s
+        .outputState = init_state(m),               // set state of output for m
+        .transitionFunction = t,                    // set both functions
+        .outputFunction = y,
+        .parentMachines = init_parent_machines(n),  // structure to know 'parent' of every bit in inputState
+        .childMachines = init_child_machines(m)     // structure to track 'child' for every bit in outputState
+
     };
-    newmachine->parentMachines = init_parent_machines(n, newmachine);  // structure to know 'parent' of every bit in inputState
-    newmachine->childMachines = init_child_machines(m);          // structure to track 'child' for every bit in outputState
 
     //UPD states
 
@@ -179,24 +172,24 @@ moore_t *ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, o
     // if not correct - free all of the adresses 
     if(get_new_output(newmachine) < 0 || (!newmachine->inputState.array && n != 0) || 
     !newmachine->curState.array || !newmachine->outputState.array ||
-    !newmachine->parentMachines.array || !newmachine->childMachines) 
+    !newmachine->parentMachines || !newmachine->childMachines) 
         MEMORY_FAILED(
-            NULL,
-            newmachine->inputState.array, 
+            NULL,                               // return value if fail 
+            newmachine->inputState.array,       // structs to free
             newmachine->curState.array, 
             newmachine->outputState.array,
-            newmachine->parentMachines.array, 
+            newmachine->parentMachines, 
             newmachine->childMachines);
 
     return newmachine;
 }
 
 // declare a mirror function for ma_create_simple
-static void mirror_function(uint64_t *output, uint64_t const *state, size_t m , size_t some) {
+static void identity_function(uint64_t *output, uint64_t const *state, size_t m , size_t some) {
     // mark as used
     (void)some;
     // calculate the number of 64-bit blocks
-    int block = ceil_div(m, 64);
+    int block = ceil_div(m, BLOCK_SIZE);
     // copy the correct number of bytes
     memcpy(output, state, block * sizeof(uint64_t));
 }
@@ -206,33 +199,15 @@ moore_t *ma_create_simple(size_t n, size_t m, transition_function_t t) {
     if(m == 0) 
         PARAMETER_FAILED(NULL);
 
-    uint64_t const *emptyarray = (uint64_t*)calloc(ceil_div(m, 64), sizeof(uint64_t));
-    return ma_create_full(n, m, m, t, mirror_function, emptyarray);
+    uint64_t const *emptyarray = (uint64_t*)calloc(ceil_div(m, BLOCK_SIZE), sizeof(uint64_t));
+    return ma_create_full(n, m, m, t, identity_function, emptyarray);
 }
 
-/** DELETING **/
+/* CONNECTING/DISCONNECTING */
 
-void ma_delete(moore_t *a) {
+static int connect_machines_bits(connect_elem_t *)
 
-    free(a->parentMachines.array);
-    moore_t machine = *a;
-    for(int i = 0; i < a->outputState.bitsSize; i++) {
-        for(size_t j = 0; j < machine.childMachines[i].size; j++) {
-            moore_t *mptr = machine.childMachines[i].array[j];
-            remove_element_from_machines_array(&mptr->parentMachines, a);
-        }
-        free(machine.childMachines[i].array);
-    }
-    free(machine.childMachines);
-
-    free((void *)a->inputState.array);
-    free((void *)a->curState.array);
-    free((void *)a->outputState.array);
-
-    free(a);
-}
-
-/** CONNECTING **/
+static int disconnect_machines_bits()
 
 int ma_connect(moore_t *a_in, size_t in, moore_t *a_out, size_t out, size_t num) {
     return 0;
@@ -241,6 +216,13 @@ int ma_connect(moore_t *a_in, size_t in, moore_t *a_out, size_t out, size_t num)
 int ma_disconnect(moore_t *a_in, size_t in, size_t num)
 {
     return 0;
+}
+
+/** DELETING **/
+
+void ma_delete(moore_t *a) {
+
+    
 }
 
 /** SETTING **/
@@ -260,3 +242,11 @@ int ma_set_state(moore_t *a, uint64_t const *state){
     return 0;
 }
 
+uint64_t const * ma_get_output(moore_t const *a){
+    return a->outputState.array;
+}
+
+int ma_step(moore_t *at[], size_t num)
+{
+    return 0;
+}
