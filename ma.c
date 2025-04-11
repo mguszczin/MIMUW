@@ -374,7 +374,7 @@ int ma_set_input(moore_t *a, uint64_t const *input){
     if(!a || !a->inputState.bitsSize || !input) PARAMETER_FAILED(-1);
 
     memcpy(a->inputState.array, input, sizeof(uint64_t) * a->inputState.blockSize);
-    
+
     return 0;
 }
 

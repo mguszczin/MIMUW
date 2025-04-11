@@ -1,27 +1,31 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -Wno-implicit-fallthrough -std=gnu17 -fPIC -O2
+CFLAGS = -Wall -Wextra -Wno-implicit-fallthrough -std=gnu17 -fPIC -O2 -g
 LFLAGS = -shared -Wl,--wrap=malloc -Wl,--wrap=calloc -Wl,--wrap=realloc -Wl,--wrap=reallocarray -Wl,--wrap=free -Wl,--wrap=strdup -Wl,--wrap=strndup
 
-SRC = ma.c memory_test.c
-OBJ = ma.o memory_test.o
-LIB = libma.so
-EXAMPLE = ma_example.c 
+SRC = ma.c memory_tests.c
+OBJ = ma.o memory_tests.o
+LIBRARY = libma.so
+EXAMPLE_SRC = ma_example.c
+EXAMPLE = ma_example
 
-.PHONY: all clean
+.PHONY: all clean test
 
-all: $(LIB)
+all: $(LIBRARY) $(EXAMPLE)
 
-$(LIB) : $(OBJ) 
-	$(CC) $(OBJ) -o $(LIBARY) $(LFLAGS)
-
-memory_test.o: memory_test.c ma.h
-	$(CC) $(CFLAGS) -c memory_test.c
+$(LIBRARY): $(OBJ)
+	$(CC) $(OBJ) -o $(LIBRARY) $(LFLAGS)
 
 ma.o: ma.c ma.h
 	$(CC) $(CFLAGS) -c ma.c
 
-ma_example: ma_example.c $(LIBRARY)
-	$(CC) $(CFLAGS) ma_example.c -o ma_example -L. -lma
+memory_tests.o: memory_tests.c ma.h
+	$(CC) $(CFLAGS) -c memory_tests.c
+
+$(EXAMPLE): $(EXAMPLE_SRC) $(LIBRARY)
+	$(CC) $(CFLAGS) $(EXAMPLE_SRC) -o $(EXAMPLE) -L. -lma -Wl,-rpath,.
+
+test: $(EXAMPLE)
+	LD_LIBRARY_PATH=. ./$(EXAMPLE) one
 
 clean:
-	rm -f *.o $(LIBRARY) ma_example
+	rm -f *.o $(LIBRARY) $(EXAMPLE)
