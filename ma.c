@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdarg.h>
-
+#include <inttypes.h> // for debug
 #include "ma.h"
 
 #define BLOCK_SIZE 64
@@ -65,6 +65,57 @@ typedef struct moore {
     machines_stack_t *childMachines;
 
 } moore_t;
+
+void print_state(const char *label, state_t st) {
+    printf("%s [bitsSize = %zu, blockSize = %zu]:\n", label, st.bitsSize, st.blockSize);
+    for (size_t i = 0; i < st.bitsSize; ++i) {
+        size_t block = i / 64;
+        size_t bit = i % 64;
+        uint64_t val = (st.array[block] >> bit) & 1;
+        printf("%" PRIu64, val);
+    }
+    printf("\n");
+}
+
+void print_machine(const moore_t *machine) {
+    if (!machine) {
+        printf("Machine is NULL\n");
+        return;
+    }
+
+    printf("==== Moore Machine at %p ====\n", (void*)machine);
+
+    // Print state arrays
+    print_state("Input State", machine->inputState);
+    print_state("Current State", machine->curState);
+    print_state("Output State", machine->outputState);
+
+    // Print parent machines
+    printf("Parent Machines:\n");
+    for (size_t i = 0; i < machine->inputState.bitsSize; ++i) {
+        connect_elem_t elem = machine->parentMachines[i];
+        if (elem.connectedMachine) {
+            printf("  Bit %zu <- Machine %p (bit %zu)\n", i, (void*)elem.connectedMachine, elem.connectedBit);
+        } else {
+            printf("  Bit %zu <- NULL\n", i);
+        }
+    }
+
+    // Print child stacks
+    printf("Child Machines:\n");
+    for (size_t i = 0; i < machine->outputState.bitsSize; ++i) {
+        printf("  Output Bit %zu:\n", i);
+        node_t *node = machine->childMachines[i].top;
+        while (node) {
+            printf("    -> Machine %p (bit %zu)\n", 
+                   (void*)node->element.connectedMachine,
+                   node->element.connectedBit);
+            node = node->prev;
+        }
+    }
+
+    printf("================================\n");
+}
 
 
 // get ceil for division of two numbers
@@ -193,7 +244,7 @@ static node_t init_node(connect_elem_t elem) {
 // function to initialize a new state struct
 // uses : ceil_div() to get a upper bound for size of all blocks
 static state_t init_state(size_t n) {
-    int blocksize = ceil_div(n , BLOCK_SIZE);
+    size_t blocksize = ceil_div(n , BLOCK_SIZE);
     return (state_t){.array = (uint64_t*)calloc(blocksize, sizeof(uint64_t)), .blockSize = blocksize, .bitsSize = n};
 }
 
@@ -210,6 +261,9 @@ moore_t *ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, o
     // create a pointer to our new machine
     moore_t *newmachine = (moore_t*)malloc(sizeof(moore_t));
     
+    if(newmachine == NULL) 
+        MEMORY_FAILED(NULL,NULL);
+
     // define a new machine
     *newmachine = (moore_t){
         .inputState = init_state(n),                      // set state of input for n 
@@ -227,7 +281,7 @@ moore_t *ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, o
     // if n == 0 we set the pointer for input to null to avoid calloc malfunction
     if(n == 0) newmachine->inputState.array = NULL;
     // set cur state of machine
-    memcpy(newmachine->curState.array, q, sizeof(uint64_t) * s);
+    memcpy(newmachine->curState.array, q, sizeof(uint64_t) * newmachine->curState.blockSize);
 
     // check for correct memory allocation and update_output
     // if not correct - free all of the adresses 
@@ -252,7 +306,7 @@ static void identity_function(uint64_t *output, uint64_t const *state, size_t m 
     // mark as used
     (void)some;
     // calculate the number of 64-bit blocks
-    int block = ceil_div(m, BLOCK_SIZE);
+    size_t block = ceil_div(m, BLOCK_SIZE);
     // copy the correct number of bytes
     memcpy(output, state, block * sizeof(uint64_t));
 }
@@ -264,7 +318,7 @@ moore_t *ma_create_simple(size_t n, size_t m, transition_function_t t) {
 
     uint64_t *emptyarray = calloc(ceil_div(m, BLOCK_SIZE), sizeof(uint64_t));
     if (emptyarray == NULL) 
-        MEMORY_FAILED(-1, NULL);
+        MEMORY_FAILED(NULL, NULL);
     
     // cast emptyarray to const when calling ma_create_full.
     moore_t *ma = ma_create_full(n, m, m, t, identity_function, (const uint64_t *)emptyarray);
