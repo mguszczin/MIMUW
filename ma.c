@@ -66,58 +66,6 @@ typedef struct moore {
 
 } moore_t;
 
-void print_state(const char *label, state_t st) {
-    printf("%s [bitsSize = %zu, blockSize = %zu]:\n", label, st.bitsSize, st.blockSize);
-    for (size_t i = 0; i < st.bitsSize; ++i) {
-        size_t block = i / 64;
-        size_t bit = i % 64;
-        uint64_t val = (st.array[block] >> bit) & 1;
-        printf("%" PRIu64, val);
-    }
-    printf("\n");
-}
-
-void print_machine(const moore_t *machine) {
-    if (!machine) {
-        printf("Machine is NULL\n");
-        return;
-    }
-
-    printf("==== Moore Machine at %p ====\n", (void*)machine);
-
-    // Print state arrays
-    print_state("Input State", machine->inputState);
-    print_state("Current State", machine->curState);
-    print_state("Output State", machine->outputState);
-
-    // Print parent machines
-    printf("Parent Machines:\n");
-    for (size_t i = 0; i < machine->inputState.bitsSize; ++i) {
-        connect_elem_t elem = machine->parentMachines[i];
-        if (elem.connectedMachine) {
-            printf("  Bit %zu <- Machine %p (bit %zu)\n", i, (void*)elem.connectedMachine, elem.connectedBit);
-        } else {
-            printf("  Bit %zu <- NULL\n", i);
-        }
-    }
-
-    // Print child stacks
-    printf("Child Machines:\n");
-    for (size_t i = 0; i < machine->outputState.bitsSize; ++i) {
-        printf("  Output Bit %zu:\n", i);
-        node_t *node = machine->childMachines[i].top;
-        while (node) {
-            printf("    -> Machine %p (bit %zu)\n", 
-                   (void*)node->element.connectedMachine,
-                   node->element.connectedBit);
-            node = node->prev;
-        }
-    }
-
-    printf("================================\n");
-}
-
-
 // get ceil for division of two numbers
 static size_t ceil_div(size_t f, size_t s) {
     return (f + s - 1) / s;
@@ -131,28 +79,8 @@ static bool same_connect_elems(connect_elem_t a, connect_elem_t b) {
 
 #define PARAMETER_FAILED(x) { errno = EINVAL; return x; }
 
-// free all the pointers given as arguments
-void memory_free(void *ptr, ...) {
-    va_list args;
-    va_start(args, ptr);
-    
-    // check if the first argument is null (no arguments passed)
-    if (ptr != NULL) {
-        free(ptr);
-    }
-    
-    // loop through the remaining arguments
-    void *next_ptr;
-    while ((next_ptr = va_arg(args, void*)) != NULL) {
-        free(next_ptr);
-    }
-    
-    va_end(args);
-}
-
-#define MEMORY_FAILED(x, ...) { \
+#define MEMORY_FAILED(x) { \
     errno = ENOMEM; \
-    memory_free(__VA_ARGS__); \
     return x; \
 }
 
@@ -262,7 +190,7 @@ moore_t *ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, o
     moore_t *newmachine = (moore_t*)malloc(sizeof(moore_t));
     
     if(newmachine == NULL) 
-        MEMORY_FAILED(NULL,NULL);
+        MEMORY_FAILED(NULL);
 
     // define a new machine
     *newmachine = (moore_t){
@@ -276,25 +204,27 @@ moore_t *ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, o
 
     };
 
+    // check for correct memory allocation and update_output
+    // if not correct - free all of the adresses 
+    if((!newmachine->inputState.array && n != 0) || 
+    !newmachine->curState.array || !newmachine->outputState.array ||
+    !newmachine->parentMachines || !newmachine->childMachines) {
+        free(newmachine->inputState.array);    
+        free(newmachine->curState.array);
+        free(newmachine->outputState.array);
+        free(newmachine->parentMachines);
+        free(newmachine->childMachines);
+        free(newmachine);
+        errno = ENOMEM;
+        return NULL;
+    }
+
     //UPD states
 
     // if n == 0 we set the pointer for input to null to avoid calloc malfunction
     if(n == 0) newmachine->inputState.array = NULL;
     // set cur state of machine
     memcpy(newmachine->curState.array, q, sizeof(uint64_t) * newmachine->curState.blockSize);
-
-    // check for correct memory allocation and update_output
-    // if not correct - free all of the adresses 
-    if((!newmachine->inputState.array && n != 0) || 
-    !newmachine->curState.array || !newmachine->outputState.array ||
-    !newmachine->parentMachines || !newmachine->childMachines) 
-        MEMORY_FAILED(
-            NULL,                               // return value if fail 
-            newmachine->inputState.array,       // structs to free
-            newmachine->curState.array, 
-            newmachine->outputState.array,
-            newmachine->parentMachines, 
-            newmachine->childMachines);
     // if everything went well generate output
     get_new_output(newmachine);
 
@@ -318,7 +248,7 @@ moore_t *ma_create_simple(size_t n, size_t m, transition_function_t t) {
 
     uint64_t *emptyarray = calloc(ceil_div(m, BLOCK_SIZE), sizeof(uint64_t));
     if (emptyarray == NULL) 
-        MEMORY_FAILED(NULL, NULL);
+        MEMORY_FAILED(NULL);
     
     // cast emptyarray to const when calling ma_create_full.
     moore_t *ma = ma_create_full(n, m, m, t, identity_function, (const uint64_t *)emptyarray);
@@ -395,7 +325,7 @@ int ma_connect(moore_t *a_in, size_t in, moore_t *a_out, size_t out, size_t num)
         size_t child = in + i, par = out + i;
         // add a new connection here 
         if(connect_machines_bits(par, a_out, child, a_in) < 0) 
-            MEMORY_FAILED(-1, NULL);
+            MEMORY_FAILED(-1);
     }
 
     return 0;
@@ -469,10 +399,12 @@ int ma_step(moore_t *at[], size_t num)
 
     for(size_t i = 0; i < num; i++) {
         moore_t *cur = at[i];
-        if(!cur) PARAMETER_FAILED(-1);
+        if(!cur) 
+            PARAMETER_FAILED(-1);
 
         uint64_t *inputarray = calloc(cur->inputState.blockSize, sizeof(uint64_t));
-        if(inputarray == NULL) MEMORY_FAILED(-1, NULL);
+        if(inputarray == NULL) 
+            MEMORY_FAILED(-1);
 
     
         for(size_t bit = 0; bit < cur->inputState.bitsSize; bit++) {
