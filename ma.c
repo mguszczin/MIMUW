@@ -14,6 +14,60 @@
 #define EMPTY_CONNECT (connect_elem_t){.connectedMachine = NULL, .connectedBit = -1}
 #define EMPTY_LIST (machines_stack_t){.top = NULL}
 
+// struct representing current state of bit array
+// array is split into 64 blocks
+typedef struct state {
+    // bit array splited into 64 blocks
+    uint64_t *array;
+    // size of blocks in array 
+    size_t blockSize;
+    // amount of bits the array really has
+    size_t bitsSize;
+} state_t;
+
+// struct used to define machines array
+
+/* ARRAY/LIST ELEMENT DEFINITION */
+
+typedef struct connect_elem {
+    moore_t *connectedMachine;     // pointer to connected machine
+    size_t connectedBit;           // index of bit it's connected to
+} connect_elem_t;
+
+/* LIST DEFINITION */
+
+typedef struct node {
+    connect_elem_t element;        // data stored in this node
+    struct node *prev;             // pointer to previous node (linked list)
+} node_t;
+
+typedef struct machines_stack {
+    node_t *top;                   // pointer to the top of the stack
+} machines_stack_t;
+
+/* MAIN STRUCT DEFINITION */
+
+// structure used to represent moore machine 
+// uses: struct state, transition_function_t, output_function_t 
+typedef struct moore {
+    // all of the possible states of machine
+    state_t inputState, curState, outputState;
+
+    // function to get newState 
+    transition_function_t transitionFunction;
+
+    // function to get new output state
+    output_function_t outputFunction;
+
+    // machines connected to our input
+    connect_elem_t *parentMachines;
+
+    // machines our output is connected to 
+    machines_stack_t *childMachines;
+
+} moore_t;
+
+
 // get ceil for division of two numbers
 static size_t ceil_div(size_t f, size_t s) {
     return (f + s - 1) / s;
@@ -117,14 +171,6 @@ static connect_elem_t *init_parent_machines_array(size_t n) {
     return parentarray;
 }
 
-static connect_elem_t init_connect_elem(size_t bit, moore_t *ma) {
-    return (connect_elem_t){.connectedBit = bit, .connectedMachine = ma};
-}
-
-static node_t init_node(connect_elem_t elem) {
-    return (node_t){.element = elem, .prev = NULL};
-}
-
 // function intializes array of arrays of machines, sets every machine to be empty 
 static machines_stack_t* init_child_machines(size_t m) {
     machines_stack_t *childarray = (machines_stack_t *)malloc(sizeof(machines_stack_t) * m);
@@ -135,6 +181,14 @@ static machines_stack_t* init_child_machines(size_t m) {
     }
 
     return childarray;
+}
+
+static connect_elem_t init_connect_elem(size_t bit, moore_t *ma) {
+    return (connect_elem_t){.connectedBit = bit, .connectedMachine = ma};
+}
+
+static node_t init_node(connect_elem_t elem) {
+    return (node_t){.element = elem, .prev = NULL};
 }
 
 // function to initialize a new state struct
@@ -164,7 +218,7 @@ moore_t *ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, o
         .outputState = init_state(m),               // set state of output for m
         .transitionFunction = t,                    // set both functions
         .outputFunction = y,
-        .parentMachines = init_parent_machines(n),  // structure to know 'parent' of every bit in inputState
+        .parentMachines = init_parent_machines_array(n),  // structure to know 'parent' of every bit in inputState
         .childMachines = init_child_machines(m)     // structure to track 'child' for every bit in outputState
 
     };
@@ -174,7 +228,7 @@ moore_t *ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, o
     // if n == 0 we set the pointer for input to null to avoid calloc malfunction
     if(n == 0) newmachine->inputState.array = NULL;
     // set cur state of machine
-    newmachine->curState.array = q;
+    memcpy(newmachine->curState.array, q, sizeof(uint64_t) * s);
 
     // check for correct memory allocation and update_output
     // if not correct - free all of the adresses 
@@ -193,7 +247,7 @@ moore_t *ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, o
     return newmachine;
 }
 
-// declare a mirror function for ma_create_simple
+// declare a identity function for ma_create_simple
 static void identity_function(uint64_t *output, uint64_t const *state, size_t m , size_t some) {
     // mark as used
     (void)some;
@@ -203,6 +257,7 @@ static void identity_function(uint64_t *output, uint64_t const *state, size_t m 
     memcpy(output, state, block * sizeof(uint64_t));
 }
 
+// MAKE SURE IT WILL WORK CORRECTLY WITH SIMPLE ASSIGIN
 moore_t *ma_create_simple(size_t n, size_t m, transition_function_t t) {
     // check if m == 0 - we don't want to calloc empty array
     if(m == 0) 
@@ -239,7 +294,6 @@ static int connect_machines_bits(size_t parbit, moore_t *par, size_t chilbit, mo
 // sets the pointer to parent on child machine to null
 // and frees the memory allocated on queue 
 static void disconnect_machines_bits(size_t parbit, moore_t *par, size_t chilbit, moore_t *chil){
-    connect_elem_t parelem = init_connect_elem(parbit, par);
     connect_elem_t chilelem = init_connect_elem(chilbit, chil);
 
     chil->parentMachines[chilbit] = EMPTY_CONNECT;
@@ -252,13 +306,14 @@ int ma_disconnect(moore_t *a_in, size_t in, size_t num)
     if(badin || !a_in || !num)
         PARAMETER_FAILED(-1);
     
-    for(int i = 0; i < num; i++) {
+    for(size_t i = 0; i < num; i++) {
         size_t child = in + num;
         moore_t *prevout = a_in->parentMachines[child].connectedMachine;
-        moore_t *prevbit = a_in->parentMachines[child].connectedBit;
+        size_t prevbit = a_in->parentMachines[child].connectedBit;
 
         if(prevout != NULL) disconnect_machines_bits(prevbit, prevout, child, a_in);
     }
+    return 0;
 }
 
 int ma_connect(moore_t *a_in, size_t in, moore_t *a_out, size_t out, size_t num) {
@@ -276,7 +331,7 @@ int ma_connect(moore_t *a_in, size_t in, moore_t *a_out, size_t out, size_t num)
     ma_disconnect(a_in, in, num);
 
     // for every bit we erase prev connection and add a new one 
-    for(int i = 0; i < num; i++) {          
+    for(size_t i = 0; i < num; i++) {          
         size_t child = in + num, par = out + num;
         // add a new connection here 
         if(connect_machines_bits(par, a_out, child, a_in) < 0) MEMORY_FAILED(-1, NULL);
@@ -317,19 +372,18 @@ void ma_delete(moore_t *a) {
 
 int ma_set_input(moore_t *a, uint64_t const *input){
     if(!a || !a->inputState.bitsSize || !input) PARAMETER_FAILED(-1);
-    free(a->inputState.array);
-    a->inputState.array = input;
+
+    memcpy(a->inputState.array, input, sizeof(uint64_t) * a->inputState.blockSize);
+    
     return 0;
 }
 
 int ma_set_state(moore_t *a, uint64_t const *state){
     if(!a || !state) PARAMETER_FAILED(-1);
 
-    free(a->curState.array);
-    a->curState.array = NULL;
-    a->curState.array = state;
-
+    memcpy(a->curState.array, state, sizeof(uint64_t) * a->curState.blockSize);
     get_new_output(a);      // upd output
+
     return 0;
 }
 
@@ -339,28 +393,37 @@ uint64_t const * ma_get_output(moore_t const *a){
     return a->outputState.array;
 }
 
+uint64_t get_bit(state_t st, size_t bit) {
+    uint64_t blockind = ceil_div(bit, BLOCK_SIZE), bitind = bit % BLOCK_SIZE;
+    return (st.array[blockind] >> bitind) & 1;
+}
+
 int ma_step(moore_t *at[], size_t num)
 {
     if(!at || !num) PARAMETER_FAILED(-1);
 
     for(size_t i = 0; i < num; i++) {
         moore_t *cur = at[i];
-        if(!cur || !num) PARAMETER_FAILED(-1)
+        if(!cur || !num) PARAMETER_FAILED(-1);
 
-        uint64_t *inputarray = (uint64_t *)malloc(sizeof(uint64_t) * cur->inputState.blockSize);
+        uint64_t *inputarray = calloc(cur->inputState.blockSize, sizeof(uint64_t));
         if(inputarray == NULL) MEMORY_FAILED(-1, NULL);
 
-        for(size_t bit = 0; bit < cur->inputState.bitsSize; i++) {
-            size_t curbl = ceil_div(bit, BLOCK_SIZE), bitind = bit % BLOCK_SIZE;
-
-            uint64_t mybit = get_bit()
-            set_bit(inputarray, curbl, bitind);
+        for(size_t bit = 0; bit < cur->inputState.bitsSize; bit++) {
+            moore_t *machine = cur->parentMachines[bit].connectedMachine;
+            uint64_t mybit;
+            if(machine == NULL) mybit = get_bit(cur->inputState, bit);
+            else mybit = get_bit(machine->outputState, cur->parentMachines[bit].connectedBit);
+            inputarray[ceil_div(bit, BLOCK_SIZE)] |= (mybit << (bit % BLOCK_SIZE));
         }
-        transition_function_t(cur->inpu)
+        cur->transitionFunction(cur->curState.array, inputarray, cur->curState.array, 
+        cur->inputState.bitsSize,cur->curState.bitsSize);
+        free(inputarray);
     }
 
     for(size_t i = 0; i < num; i++) {
         moore_t *cur = at[i];
         get_new_output(cur);
     }
+    return 0;
 }
