@@ -181,6 +181,21 @@ static void get_new_output(moore_t *ma) {
     ma->outputFunction(ma->outputState.array, ma->curState.array, ma->outputState.bitsSize, ma->curState.bitsSize);
 }
 
+static int get_new_state(moore_t *ma, uint64_t *inputarray) {
+        uint64_t *prevState = calloc(ma->inputState.blockSize, sizeof(uint64_t));
+        if (!prevState) {
+            MEMORY_FAILED(-1);
+        }
+
+        memcpy(prevState, ma->curState.array, sizeof(uint64_t) * ma->curState.bitsSize);
+
+        ma->transitionFunction(ma->curState.array, inputarray, ma->curState.array, 
+        ma->inputState.bitsSize,ma->curState.bitsSize);
+
+        free(prevState);
+        return 0;
+}
+
 moore_t *ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, output_function_t y, uint64_t const *q){
     // check if the parameters are correct
     if(!s || !m || !t || !y || !q) 
@@ -208,7 +223,7 @@ moore_t *ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, o
     // if not correct - free all of the adresses 
     if((!newmachine->inputState.array && n != 0) || 
     !newmachine->curState.array || !newmachine->outputState.array ||
-    !newmachine->parentMachines || !newmachine->childMachines) {
+    (!newmachine->parentMachines && n != 0) || !newmachine->childMachines) {
         free(newmachine->inputState.array);    
         free(newmachine->curState.array);
         free(newmachine->outputState.array);
@@ -414,8 +429,8 @@ int ma_step(moore_t *at[], size_t num)
             else mybit = get_bit(machine->outputState, cur->parentMachines[bit].connectedBit);
             inputarray[bit / BLOCK_SIZE] |= (mybit << (bit % BLOCK_SIZE));
         }
-        cur->transitionFunction(cur->curState.array, inputarray, cur->curState.array, 
-        cur->inputState.bitsSize,cur->curState.bitsSize);
+        if(get_new_state(cur, inputarray) < 0) 
+            MEMORY_FAILED(-1);
         free(inputarray);
     }
 
