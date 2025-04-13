@@ -203,15 +203,15 @@ static void update_output(moore_t *ma) {
 }
 
 // get new state, declare prevState to avoid overwriting
-static int update_state(moore_t *ma, uint64_t *inputarray) {
-    uint64_t *new_state = calloc(ma->input_state.block_count, sizeof(uint64_t));
+static int update_state(moore_t *machine) {
+    uint64_t *new_state = calloc(machine->input_state.block_count, sizeof(uint64_t));
     if (!new_state) 
         MEMORY_FAILED(-1);
         
-    ma->transition_function(new_state, inputarray, ma->current_state.array,
-        ma->input_state.bits_count, ma->current_state.bits_count);
+    machine->transition_function(new_state, machine->input_state.array, machine->current_state.array,
+        machine->input_state.bits_count, machine->current_state.bits_count);
         
-    memcpy(ma->current_state.array, new_state,ma->current_state.block_count * sizeof(uint64_t));
+    memcpy(machine->current_state.array, new_state,machine->current_state.block_count * sizeof(uint64_t));
         
     free(new_state);
     return 0;
@@ -444,37 +444,41 @@ uint64_t get_bit(state_t st, size_t n) {
     return (st.array[block_index] >> bit_index) & 1;
 }
 
+void set_bit_to(state_t *state, size_t bit, uint64_t value) {
+    size_t index = bit / BLOCK_SIZE;
+    size_t offset = bit % BLOCK_SIZE;
+    if (value)
+        state->array[index] |= (1ULL << offset);
+    else
+        state->array[index] &= ~(1ULL << offset);
+}
+
 // first we get our new state by checking to which machine each bit is connected to
 // when every state is updated we update the out
 int ma_step(moore_t *at[], size_t num)
 {
-    if(!at || !num) PARAMETER_FAILED(-1);
+    if(!at || !num) 
+        PARAMETER_FAILED(-1);
 
-    for(size_t i = 0; i < num; i++) {
+    for(size_t i = 0; i < num; i++)
         if(!at[i]) 
             PARAMETER_FAILED(-1);
-    }
 
     for(size_t i = 0; i < num; i++) {
         moore_t *cur = at[i];
-
-        uint64_t *input_array = calloc(cur->input_state.block_count, sizeof(uint64_t));
-        if(input_array == NULL) 
-            MEMORY_FAILED(-1);
 
         for(size_t bit = 0; bit < cur->input_state.bits_count; bit++) {
             // get the machine we are connected to 
             moore_t *machine = cur->parent_machines[bit].connected_machine;
             uint64_t mybit;
             // get the value of bit (0 or 1)
-            if(machine == NULL) mybit = get_bit(cur->input_state, bit);
+            if(!machine) mybit = get_bit(cur->input_state, bit);
             else mybit = get_bit(machine->output_state, cur->parent_machines[bit].connected_bit);
             // asign 
-            input_array[bit / BLOCK_SIZE] |= (mybit << (bit % BLOCK_SIZE));
+            set_bit_to(&(cur->input_state), bit, mybit);
         }
-        if(update_state(cur, input_array) < 0) 
+        if(update_state(cur) < 0) 
             MEMORY_FAILED(-1);
-        free(input_array);
     }
 
     for(size_t i = 0; i < num; i++) {

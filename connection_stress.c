@@ -1,15 +1,15 @@
 // Ignacy Boehlke
-// Użycie: includujemy gdzieś w ma_example.c i dodajemy TEST(connection_stress) do
+// Użycie: includujemy gdzieś w ma_example.c i dodajemy TEST(connection_stress) do
 // test_list.
 //
-// Sprawdzarce można włączyć więcej wypisywania za pomocą zmiennej środowiskowej:
+// Sprawdzarce można włączyć więcej wypisywania za pomocą zmiennej środowiskowej:
 // $ PRINT_INFO=1 ./ma_example connection_stress
 //
-// W testach są trzy automaty, dwa mające tylko wyjście (wyjściowe) i jeden, który
+// W testach są trzy automaty, dwa mające tylko wyjście (wyjściowe) i jeden, który
 // przepisuje swoje wejście na wyjście (główny). W ramach zapytania podłączamy losowy
 // zakres wyjść z wyjściowych automatów do wejść głownego, odłączamy losowy zakres wejść
 // od głównego, albo usuwamy któryś z automatów i tworzymy go na nowo. Po każdym zapytaniu
-// sprawdzamy, czy stan na wyjściu głównego automatu się odpowiednio zmienił.
+// sprawdzamy, czy stan na wyjściu głównego automatu się odpowiednio zmienił.
 // Sposób obsługiwania przez bibliotekę bitów poza zakresem nie powinien mieć wpływu na
 // wynik.
 
@@ -94,8 +94,8 @@ static void print_bits(uint64_t *arr, size_t s) {
 	fputc('\n', stderr);
 }
 
-#define PRINT_BITS(x, len) do if (len <= 100) {                        \
-	fprintf(stderr, "%s:\n", #x);                                      \
+#define PRINT_BITS(comment, x, len) do if (len <= 100) {               \
+	fprintf(stderr, "%s:\n", comment);                                 \
 	print_bits(x, len);                                                \
 } while(0)
 
@@ -196,13 +196,13 @@ static int run_connection_test(size_t run_id, size_t query_count, size_t max_siz
 			size_t num = rd(1, mains - lmain);
 
 			INFO("disconnecting inputs %lu-%lu\n", lmain, lmain + num - 1);
-			ma_set_input(main, zero_array);
 
 			for (size_t i = 0; i < num; ++i) {
 				set_bit(connected, lmain + i, 0);
 				set_bit(connected_to_1, lmain + i, 0);
 			}
 			CALL(ma_disconnect(main, lmain, num));
+			ma_set_input(main, zero_array);
 		} else {
 			int mid = rd(0, 2);
 			INFO("deleting and creating machine %d\n", mid);
@@ -220,6 +220,7 @@ static int run_connection_test(size_t run_id, size_t query_count, size_t max_siz
 				memset(connected, 0, BITC_TO_BYTEC(mains));
 				memset(connected_to_1, 0, BITC_TO_BYTEC(mains));
 			}
+			ma_set_input(main, zero_array);
 		}
 
 		// checking if the new connections/disconnections were handled correctly
@@ -238,11 +239,11 @@ static int run_connection_test(size_t run_id, size_t query_count, size_t max_siz
 		if (!bitset_equal(ored, connected, mains) ||
 				!bitset_equal(output, connected_to_1, mains)) {
 			fprintf(stderr, "Failed on run %lu, query %lu\n", run_id, q);
-			PRINT_BITS(connected     , mains);
-			PRINT_BITS(connected_to_1, mains);
-			PRINT_BITS(output        , mains);
-			PRINT_BITS(inverted      , mains);
-			PRINT_BITS(ored          , mains);
+			PRINT_BITS("Which inputs should be connected", connected, mains);
+			PRINT_BITS("Which inputs libma says are connected", ored, mains);
+			PRINT_BITS("Which inputs should be connected to m1", connected_to_1, mains);
+			PRINT_BITS("Which inputs libma says are connected to m1", output, mains);
+			PRINT_BITS("Which inputs libma says are connected to m0", inverted, mains);
 			for (int i = 0; i < 3; ++i)
 				ma_delete(m[i]);
 			return FAIL;
