@@ -4,22 +4,24 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdarg.h>
-#include <inttypes.h> // for debug
+#include <limits.h>
 #include "ma.h"
 
-#define BLOCK_SIZE 64
 
+#define BLOCK_SIZE 64
 #define EMPTY_ARRAY NULL 
 #define EMPTY_CONNECT (connect_elem_t){.connected_machine = NULL, .connected_bit = -1}
 #define EMPTY_STACK (machines_stack_t){.top = NULL}
 
-/** ERROR HANDLING **/
+/** ERROR HANDLING MACROS **/
 
 #define PARAMETER_FAILED(x) { errno = EINVAL; return x; }
 
 #define MEMORY_FAILED(x)  { errno = ENOMEM; return x; }
 
 /** STRUCTURES DEFINITIONS **/
+
+/** STATE DEFINITION **/
 
 // struct representing current state of bit array
 // array is split into 64 blocks
@@ -61,7 +63,8 @@ typedef struct node {
 
 } node_t;
 
-// stack
+/* STACK DEFINITION */
+
 // uses : node
 typedef struct machines_stack {
     // pointer to the top of the stack
@@ -71,23 +74,43 @@ typedef struct machines_stack {
 
 /* MAIN STRUCT DEFINITION */
 
-// structure used to represent moore machine 
-// uses: struct state, transition_function_t, output_function_t 
-// for every bit in out machine we will rememeber the bits  
+/**
+ * Represents a Moore machine.
+ *
+ * Each machine maintains three bit arrays (states):
+ * - input_state: Bits gathered from other machines it's connected to (parents)
+ * - current_state: The internal state of this machine
+ * - output_state: Bits that are passed on to other machines (children)
+ *
+ * The machine forms a bit-level network with other machines using connections:
+ *
+ * - Each bit in the input_state can be connected to a specific bit of another machine's output.
+ *   These connections are stored in the `parent_machines` array, where:
+ *     - `parent_machines[i]` describes the machine and bit index that feed into `input_state[i]`.
+ *
+ * - Each bit in the output_state can have one or more machines "listening" to it.
+ *   These are stored in the `child_machines` stack:
+ *     - Each node in the stack (`node_t`) describes a child machine and the bit in its input_state
+ *       that this output bit is connected to.
+ *     - Multiple children can listen to the same output bit.
+ *
+ * - `transition_function`: Computes the new internal state based on the input_state
+ * - `output_function`: Computes the output_state from the current_state
+ */
 typedef struct moore {
     // all of the possible states of machine
     state_t input_state, current_state, output_state;
 
-    // function to get newState 
+    // function to get new state 
     transition_function_t transition_function;
 
     // function to get new output state
     output_function_t output_function;
 
-    // machines connected to our input
+    // machines connected input
     connect_elem_t *parent_machines;
 
-    // machines our output is connected to 
+    // machines output is connected to 
     machines_stack_t *child_machines;
 
 } moore_t;
@@ -152,6 +175,29 @@ static void push_node(node_t *node, machines_stack_t *stack) {
     node->prev = prev_node;
 }
 
+/** UPDATING STATES **/
+
+// Calc the new output and then assign it to the array machine points to 
+static void update_output(moore_t *ma) {
+    ma->output_function(ma->output_state.array, ma->current_state.array, 
+        ma->output_state.bits_count, ma->current_state.bits_count);
+}
+
+// get new state, declare prevState to avoid overwriting
+static int update_state(moore_t *machine) {
+    uint64_t *new_state = calloc(machine->current_state.block_count, sizeof(uint64_t));
+    if (!new_state) 
+        MEMORY_FAILED(-1);
+        
+    machine->transition_function(new_state, machine->input_state.array, machine->current_state.array,
+        machine->input_state.bits_count, machine->current_state.bits_count);
+        
+    memcpy(machine->current_state.array, new_state,
+        machine->current_state.block_count * sizeof(uint64_t));
+        
+    free(new_state);
+    return 0;
+}
 
 /** INITIALIZATION **/
 
@@ -159,10 +205,12 @@ static void push_node(node_t *node, machines_stack_t *stack) {
 // initially we set each bit to NULL - because we don't have any parents
 static connect_elem_t *init_parent_machines_array(size_t n) {
     // return empty we don't want to change calloc initialize for zero
-    if(n == 0) return EMPTY_ARRAY;
+    if(!n) return 
+        EMPTY_ARRAY;
 
     connect_elem_t *parent_array = (connect_elem_t *)malloc(n * sizeof(connect_elem_t));
-    if(parent_array == NULL) return EMPTY_ARRAY;
+    if(!parent_array) 
+        return EMPTY_ARRAY;
 
     for(size_t i = 0; i < n; i++) {
         parent_array[i] = EMPTY_CONNECT;
@@ -174,7 +222,8 @@ static connect_elem_t *init_parent_machines_array(size_t n) {
 // function intializes array of arrays of machines, sets every machine to be empty 
 static machines_stack_t* init_child_machines(size_t m) {
     machines_stack_t *children_array = (machines_stack_t *)calloc(m, sizeof(machines_stack_t));
-    if(children_array == NULL) return EMPTY_ARRAY;
+    if(!children_array) 
+        return EMPTY_ARRAY;
 
     for(size_t i = 0; i < m; i++) {
         children_array[i] = EMPTY_STACK;
@@ -184,37 +233,29 @@ static machines_stack_t* init_child_machines(size_t m) {
 }
 
 static connect_elem_t init_connect_elem(size_t bit, moore_t *ma) {
-    return (connect_elem_t){.connected_bit = bit, .connected_machine = ma};
+    return (connect_elem_t){
+        .connected_bit = bit, 
+        .connected_machine = ma
+    };
 }
 
 static node_t init_node(connect_elem_t elem) {
-    return (node_t){.element = elem, .prev = NULL};
+    return (node_t){
+        .element = elem, 
+        .prev = NULL
+    };
 }
 
-// function to initialize a new state struct
 static state_t init_state(size_t n) {
+    if(!n)                  // handle n == 0 , we don't want to calloc empty array
+        return (state_t){0};
+
     size_t block_count = calculate_block_count(n);
-    return (state_t){.array = (uint64_t*)calloc(block_count, sizeof(uint64_t)), .block_count = block_count, .bits_count = n};
-}
-
-// Calc the new output and then assign it to the array machine points to 
-static void update_output(moore_t *ma) {
-    ma->output_function(ma->output_state.array, ma->current_state.array, ma->output_state.bits_count, ma->current_state.bits_count);
-}
-
-// get new state, declare prevState to avoid overwriting
-static int update_state(moore_t *machine) {
-    uint64_t *new_state = calloc(machine->input_state.block_count, sizeof(uint64_t));
-    if (!new_state) 
-        MEMORY_FAILED(-1);
-        
-    machine->transition_function(new_state, machine->input_state.array, machine->current_state.array,
-        machine->input_state.bits_count, machine->current_state.bits_count);
-        
-    memcpy(machine->current_state.array, new_state,machine->current_state.block_count * sizeof(uint64_t));
-        
-    free(new_state);
-    return 0;
+    return (state_t){
+        .array = (uint64_t*)calloc(block_count, sizeof(uint64_t)), 
+        .block_count = block_count, 
+        .bits_count = n
+    };
 }
 
 moore_t *ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, output_function_t y, uint64_t const *q){
@@ -231,7 +272,7 @@ moore_t *ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, o
     // define a new machine
     *new_machine = (moore_t){
         .input_state = init_state(n),                      // set state of input for n 
-        .current_state = init_state(s),                        // set state of current state for s
+        .current_state = init_state(s),                    // set state of current state for s
         .output_state = init_state(m),                     // set state of output for m
         .transition_function = t,                          // set both functions
         .output_function = y,
@@ -257,8 +298,6 @@ moore_t *ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, o
 
     //UPD states
 
-    // if n == 0 we set the pointer for input to null to avoid calloc malfunction
-    if(n == 0) new_machine->input_state.array = NULL;
     // set cur state of machine
     memcpy(new_machine->current_state.array, q, sizeof(uint64_t) * new_machine->current_state.block_count);
     // if everything went well generate output
@@ -281,7 +320,7 @@ static void identity_function(uint64_t *output, uint64_t const *state, size_t m 
 // uses : ma_create_full() 
 moore_t *ma_create_simple(size_t n, size_t m, transition_function_t t) {
     // check if m == 0 - we don't want to calloc empty array
-    if(!m) 
+    if(!m || !t) 
         PARAMETER_FAILED(NULL);
 
     uint64_t *empty_array = calloc(calculate_block_count(m), sizeof(uint64_t));
@@ -318,10 +357,10 @@ static int connect_machines_bits(size_t parent_bit, moore_t *parent, size_t chil
 // sets the pointer to parent on child machine to null
 // and frees the memory allocated on queue (using delete_node())
 static void disconnect_machines_bits(size_t parent_bit, moore_t *parent, size_t child_bit, moore_t *child){
-    connect_elem_t chilelem = init_connect_elem(child_bit, child);
+    connect_elem_t child_element = init_connect_elem(child_bit, child);
 
     child->parent_machines[child_bit] = EMPTY_CONNECT;
-    delete_node(chilelem, &(parent->child_machines[parent_bit]));
+    delete_node(child_element, &(parent->child_machines[parent_bit]));
 }
 
 // disconnects 'num' input bits starting from index 'in' in the given machine 'a_in'.
@@ -330,9 +369,10 @@ static void disconnect_machines_bits(size_t parent_bit, moore_t *parent, size_t 
 int ma_disconnect(moore_t *a_in, size_t in, size_t num)
 {
     // check if input range is out of bounds or if parameters are invalid
-    bool bad_in = (in + num - 1) >= a_in->input_state.bits_count;
-    if(bad_in || !a_in || !num)
+    if (!a_in || !num || 
+        in > UINT64_MAX - (num - 1) || (in + num - 1) >= a_in->input_state.bits_count)
         PARAMETER_FAILED(-1);
+
     
     // now our function disconnects 'num' input bits starting at 'in' from their connected machines
     for(size_t i = 0; i < num; i++) {
@@ -347,20 +387,24 @@ int ma_disconnect(moore_t *a_in, size_t in, size_t num)
             disconnect_machines_bits(prev_bit, prev_out, child_bit, a_in);
     }
 
-    // return success after all disconnections are complete
     return 0;
 }
 
 // we will connect two ranges of bits together
 int ma_connect(moore_t *a_in, size_t in, moore_t *a_out, size_t out, size_t num) {
    
-    if(!a_out || !a_in || !num)
+    if (!a_out || !a_in || !num)
         PARAMETER_FAILED(-1);
-    
-    // we define when range is bad
+
+    // Prevent overflows: in + num - 1 and out + num - 1
+    if (in > UINT64_MAX - (num - 1) || out > UINT64_MAX - (num - 1))
+        PARAMETER_FAILED(-1);
+
+    // Check if ranges are within bounds
     bool bad_in = (in + num - 1) >= a_in->input_state.bits_count;
     bool bad_out = (out + num - 1) >= a_out->output_state.bits_count;
-    if(bad_in || bad_out) 
+
+    if (bad_in || bad_out)
         PARAMETER_FAILED(-1);
     
     //disconnect all bits on this range 
@@ -382,7 +426,8 @@ int ma_connect(moore_t *a_in, size_t in, moore_t *a_out, size_t out, size_t num)
 // first we need to delete all of our children - all elements in stack (uses disconnect_machines_bits())
 // then we can free the structure without any complications
 void ma_delete(moore_t *a) {
-    if(a == NULL) return;
+    if(!a) 
+        return;
 
     if(a->input_state.bits_count > 0) ma_disconnect(a, 0, a->input_state.bits_count);  // disconnect all parents from child
     
@@ -412,9 +457,10 @@ void ma_delete(moore_t *a) {
 
 /** SETTING **/
 
-// get out new input 
+// get new input
 int ma_set_input(moore_t *a, uint64_t const *input){
-    if(!a || !a->input_state.bits_count || !input) PARAMETER_FAILED(-1);
+    if(!a || !a->input_state.bits_count || !input) 
+        PARAMETER_FAILED(-1);
 
     memcpy(a->input_state.array, input, sizeof(uint64_t) * a->input_state.block_count);
 
@@ -423,17 +469,19 @@ int ma_set_input(moore_t *a, uint64_t const *input){
 
 // get new state and update output
 int ma_set_state(moore_t *a, uint64_t const *state){
-    if(!a || !state) PARAMETER_FAILED(-1);
+    if(!a || !state) 
+        PARAMETER_FAILED(-1);
 
     memcpy(a->current_state.array, state, sizeof(uint64_t) * a->current_state.block_count);
-    update_output(a);      // upd output
+    update_output(a);     
 
     return 0;
 }
 
 // return pointer to outputState array
 uint64_t const * ma_get_output(moore_t const *a){
-    if(!a) PARAMETER_FAILED(NULL);
+    if(!a) 
+        PARAMETER_FAILED(NULL);
 
     return a->output_state.array;
 }
@@ -454,7 +502,7 @@ void set_bit_to(state_t *state, size_t bit, uint64_t value) {
 }
 
 // first we get our new state by checking to which machine each bit is connected to
-// when every state is updated we update the out
+// when every state is updated we update out
 int ma_step(moore_t *at[], size_t num)
 {
     if(!at || !num) 
@@ -474,10 +522,16 @@ int ma_step(moore_t *at[], size_t num)
             // get the value of bit (0 or 1)
             if(!machine) mybit = get_bit(cur->input_state, bit);
             else mybit = get_bit(machine->output_state, cur->parent_machines[bit].connected_bit);
-            // asign 
+            // assign 
             set_bit_to(&(cur->input_state), bit, mybit);
         }
-        if(update_state(cur) < 0) 
+        int val = update_state(cur);
+        if(val < 0) {
+            // update output for all machines with changed states
+            for(int j = 0; j < i; j++) 
+                update_output(at[j]);
+        }
+        if(val < 0) 
             MEMORY_FAILED(-1);
     }
 
