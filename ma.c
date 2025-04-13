@@ -15,9 +15,9 @@
 
 /** ERROR HANDLING MACROS **/
 
-#define PARAMETER_FAILED(x) { errno = EINVAL; return x; }
+#define PARAMETER_FAILED(x) do { errno = EINVAL; return (x); } while (0)
 
-#define MEMORY_FAILED(x)  { errno = ENOMEM; return x; }
+#define MEMORY_FAILED(x) do { errno = ENOMEM; return (x); } while (0)
 
 /** STRUCTURES DEFINITIONS **/
 
@@ -132,9 +132,8 @@ static bool same_connect_elems(connect_elem_t a, connect_elem_t b) {
 static void delete_node(connect_elem_t node_to_delete, machines_stack_t *stack) {
     // if stack is empty we don't do anything
     node_t *current_node = stack->top, *used_node = NULL;
-    if(current_node == NULL) {
+    if(!current_node)
         return;
-    }  
 
     // if we delete top of the we just set the top to prev (might be null)
     if(same_connect_elems(current_node->element, node_to_delete)) {
@@ -153,7 +152,8 @@ static void delete_node(connect_elem_t node_to_delete, machines_stack_t *stack) 
     }
 
     // if we don't find the node we simply return
-    if(current_node == NULL) return;
+    if(!current_node) 
+        return;
 
     // unlink the pointer
     used_node->prev = current_node->prev;
@@ -163,7 +163,7 @@ static void delete_node(connect_elem_t node_to_delete, machines_stack_t *stack) 
 // we add node to the back of the list 
 static void push_node(node_t *node, machines_stack_t *stack) {
     // case where stack is empty
-    if(stack->top == NULL){
+    if(!stack->top){
         stack->top = node;
         node->prev = NULL;  // make sure last element in stack points to null 
         return;
@@ -183,7 +183,7 @@ static void update_output(moore_t *ma) {
         ma->output_state.bits_count, ma->current_state.bits_count);
 }
 
-// get new state, declare prevState to avoid overwriting
+// get new state, declare prev_state to avoid overwriting
 static int update_state(moore_t *machine) {
     uint64_t *new_state = calloc(machine->current_state.block_count, sizeof(uint64_t));
     if (!new_state) 
@@ -292,8 +292,7 @@ moore_t *ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, o
         free(new_machine->parent_machines);
         free(new_machine->child_machines);
         free(new_machine);
-        errno = ENOMEM;
-        return NULL;
+        MEMORY_FAILED(NULL);
     }
 
     //UPD states
@@ -336,19 +335,20 @@ moore_t *ma_create_simple(size_t n, size_t m, transition_function_t t) {
 
 /* CONNECTING/DISCONNECTING */
 
-// we connect two bits and machines together
+// we connect two bits together
 static int connect_machines_bits(size_t parent_bit, moore_t *parent, size_t child_bit, moore_t *child){
     connect_elem_t parent_element = init_connect_elem(parent_bit, parent);
     connect_elem_t child_element = init_connect_elem(child_bit, child);   
 
     // get a pointer to a new node and initialize 
-    node_t *new_node = (node_t *)malloc(sizeof(node_t));
-    if(new_node == NULL) return -1;                  // return -1 if allocation failed
-    *new_node = init_node(child_element);
+    node_t *child_node = (node_t *)malloc(sizeof(node_t));
+    if(!child_node) 
+        return -1;                  // return -1 if allocation failed
+    *child_node = init_node(child_element);
 
     // update parent array and add node to list
     child->parent_machines[child_bit] = parent_element;
-    push_node(new_node, &(parent->child_machines[parent_bit]));
+    push_node(child_node, &(parent->child_machines[parent_bit]));
 
     return 0;
 }
@@ -435,6 +435,7 @@ void ma_delete(moore_t *a) {
     for(size_t cur_bit = 0; cur_bit < a->output_state.bits_count; cur_bit++) {
         machines_stack_t *s = &(a->child_machines[cur_bit]);
         node_t *top_node = s->top;
+
         // delete all children from list one by one 
         while(top_node != NULL) {
             node_t *prev = top_node->prev;  // save it before it might be freed
@@ -517,22 +518,18 @@ int ma_step(moore_t *at[], size_t num)
 
         for(size_t bit = 0; bit < cur->input_state.bits_count; bit++) {
             // get the machine we are connected to 
-            moore_t *machine = cur->parent_machines[bit].connected_machine;
+            moore_t *parent_machine = cur->parent_machines[bit].connected_machine;
             uint64_t mybit;
             // get the value of bit (0 or 1)
-            if(!machine) mybit = get_bit(cur->input_state, bit);
-            else mybit = get_bit(machine->output_state, cur->parent_machines[bit].connected_bit);
-            // assign 
+            if(!parent_machine) mybit = get_bit(cur->input_state, bit);
+            else mybit = get_bit(parent_machine->output_state, cur->parent_machines[bit].connected_bit);
+            // assign bit 
             set_bit_to(&(cur->input_state), bit, mybit);
         }
         int val = update_state(cur);
-        if(val < 0) {
-            // update output for all machines with changed states
-            for(int j = 0; j < i; j++) 
-                update_output(at[j]);
-        }
         if(val < 0) 
             MEMORY_FAILED(-1);
+        
     }
 
     for(size_t i = 0; i < num; i++) {
