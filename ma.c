@@ -184,19 +184,12 @@ static void update_output(moore_t *ma) {
 }
 
 // get new state, declare prev_state to avoid overwriting
-static int update_state(moore_t *machine) {
-    uint64_t *new_state = calloc(machine->current_state.block_count, sizeof(uint64_t));
-    if (!new_state) 
-        MEMORY_FAILED(-1);
-        
+static void update_state(moore_t *machine, uint64_t *new_state) {
     machine->transition_function(new_state, machine->input_state.array, machine->current_state.array,
         machine->input_state.bits_count, machine->current_state.bits_count);
-        
+
     memcpy(machine->current_state.array, new_state,
         machine->current_state.block_count * sizeof(uint64_t));
-        
-    free(new_state);
-    return 0;
 }
 
 /** INITIALIZATION **/
@@ -336,14 +329,10 @@ moore_t *ma_create_simple(size_t n, size_t m, transition_function_t t) {
 /* CONNECTING/DISCONNECTING */
 
 // we connect two bits together
-static int connect_machines_bits(size_t parent_bit, moore_t *parent, size_t child_bit, moore_t *child){
+static int connect_machines_bits(size_t parent_bit, moore_t *parent, size_t child_bit, moore_t *child, node_t *child_node){
     connect_elem_t parent_element = init_connect_elem(parent_bit, parent);
     connect_elem_t child_element = init_connect_elem(child_bit, child);   
 
-    // get a pointer to a new node and initialize 
-    node_t *child_node = (node_t *)malloc(sizeof(node_t));
-    if(!child_node) 
-        return -1;                  // return -1 if allocation failed
     *child_node = init_node(child_element);
 
     // update parent array and add node to list
@@ -407,6 +396,22 @@ int ma_connect(moore_t *a_in, size_t in, moore_t *a_out, size_t out, size_t num)
     if (bad_in || bad_out)
         PARAMETER_FAILED(-1);
     
+    node_t **new_nodes = (node_t **)malloc(sizeof(node_t *) * num);
+    if(!new_nodes) 
+        MEMORY_FAILED(-1);
+        
+    for (size_t i = 0; i < num; i++) {
+        new_nodes[i] = malloc(sizeof(node_t));
+        if (!new_nodes[i]) {
+            // cleanup already allocated nodes
+            for (size_t j = 0; j < i; j++)
+                free(new_nodes[j]);
+            free(new_nodes);
+            MEMORY_FAILED(-1);
+        }
+    }
+    
+    
     //disconnect all bits on this range 
     ma_disconnect(a_in, in, num);
 
@@ -414,9 +419,10 @@ int ma_connect(moore_t *a_in, size_t in, moore_t *a_out, size_t out, size_t num)
     for(size_t i = 0; i < num; i++) {          
         size_t child = in + i, par = out + i;
         // add a new connection here 
-        if(connect_machines_bits(par, a_out, child, a_in) < 0) 
-            MEMORY_FAILED(-1);
+        connect_machines_bits(par, a_out, child, a_in, new_nodes[i]);
     }
+    
+    free(new_nodes);
 
     return 0;
 }
@@ -512,6 +518,19 @@ int ma_step(moore_t *at[], size_t num)
     for(size_t i = 0; i < num; i++)
         if(!at[i]) 
             PARAMETER_FAILED(-1);
+    
+    uint64_t **newstates = (uint64_t **)malloc(sizeof(uint64_t *) * num);
+    if(!newstates)
+        MEMORY_FAILED(-1);
+    
+    for(size_t i = 0; i < num; i++) {
+        newstates[i] = calloc(at[i]->current_state.block_count, sizeof(uint64_t));
+        if(!newstates[i]) {
+            for(size_t j = 0; j < i; j++) 
+                free(newstates[j]);
+            MEMORY_FAILED(-1);
+        }
+    }
 
     for(size_t i = 0; i < num; i++) {
         moore_t *cur = at[i];
@@ -526,9 +545,7 @@ int ma_step(moore_t *at[], size_t num)
             // assign bit 
             set_bit_to(&(cur->input_state), bit, mybit);
         }
-        int val = update_state(cur);
-        if(val < 0) 
-            MEMORY_FAILED(-1);
+        update_state(cur, newstates[i]);
         
     }
 
@@ -536,5 +553,10 @@ int ma_step(moore_t *at[], size_t num)
         moore_t *cur = at[i];
         update_output(cur);
     }
+
+    for(size_t i = 0; i < num; i++) 
+        free(newstates[i]);
+    free(newstates);
+
     return 0;
 }
