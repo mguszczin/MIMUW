@@ -18,7 +18,7 @@ struct pointer_to_converted_int {
 typedef typeof(void (int)) *sighandler_t;
 
 uint8_t writer_template[] = {
-	0xf3, 0x0f, 0x1e, 0xfa,             // endbr64
+        0xf3, 0x0f, 0x1e, 0xfa,             // endbr64
 	0x55,                               // push rbp
 	0x48, 0x89, 0xe5,                   // mov rbp,rsp
 	0x48, 0x83, 0xec, 0x10,             // sub rsp,0x10
