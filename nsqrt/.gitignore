@@ -1,0 +1,9 @@
+#object files
+*.o
+#dirs
+tests/
+.vscode/
+#elfs
+*.o
+*.so
+*.exe 

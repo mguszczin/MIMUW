@@ -1,0 +1,166 @@
+global nsqrt 
+
+section .text
+; void nsqrt(uint64_t *Q, uint64_t *X, uint64_t n)
+; rdi = pointer to result 
+; rsi = pointer to input value
+; rdx number of bytes
+; computes Q such that Q^2 <= X < (Q + 1)^2
+
+; use of callee safe registers:
+; rbx = n (number of bits)
+; r13 = Q (pointer to Q)
+; r14 = R (pointer to R)
+; r15 = block_count (n / 64)
+nsqrt:
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+
+    mov rbx, rdx                ; set n 
+    shr rdx, 6                  ; n / 64 (block_count)
+    mov r15, rdx                ; set block_count
+    mov r13, rdi                ; set Q pointer
+    mov r14, rsi                ; set R pointer
+
+    xor rax, rax                ; set rax = 0
+    mov rcx, r15                ; set counter
+    rep stosq                   ; set the Q = 0 / rdi = Q
+
+    xor r8, r8                  ; i = 0
+; MAIN LOOP
+; r8 = i = 1 .. n
+; r9 = (n - i + 1) / 64 (block_move)
+; rcx = (n - i + 1) % 64 (block_offset)
+; r12 = (n - i + 1)
+.main_loop:
+    mov r12, rbx                
+    sub r12, r8                 ; r12 = n - i + 1
+
+    mov r9, r12
+    shr r9, 6                   ; set r9 = (n - i + 1) / 64
+
+    mov rcx, r12
+    and rcx, 63                 ; set rcx = (n - i + 1) % 64
+
+    inc r8                      ; i++
+
+    cmp rbx, r8                 ; check i == n
+    je .compare                 ; if i == n -> compare (edge case)
+    
+    ; now set the the 2^{n - i - 1} 
+    lea r11, [r12 - 2]          ; r11 = n‑i‑1
+    mov r10, r11                ; copy for the bit‑index
+    and r10, 63                 ; r10 = (n‑i‑1) % 64
+    shr r11,   6                ; r11 = (n‑i‑1) / 64
+    bts qword [r13 + r11*8], r10
+
+.compare:
+; COMPARE LOOP
+; r11 = j (block_count -> 0)
+; rax = Q[j]    (first)
+; rdx = Q[j - 1](second)
+; r10 = max_index
+    mov r11, r15                ; j = block_count 
+    mov rdx, 0                  ; set second = 0 
+
+    lea r10, [r15 * 2]          ; r10 = max_index = block_count * 2
+.compare_calculate_offset:
+    mov rax, rdx                ; first = second
+
+    cmp r11, 0                  ; check j == 0
+    je .compare_no_prev         ; if j == 0 -> compare_no_prev
+
+    mov rdx, [r13 + r11 * 8 - 8]; second = Q[j - 1]
+    shld rax, rdx, cl           ; calculate offset Q[i] and Q[i - 1]
+    jmp .compare_X_and_Q        
+
+.compare_no_prev:
+    shl rax, cl                 ; calculate offset for single elem
+
+    cmp r12, 1                  ; check n - i + 1 == 1 (edge case)
+    jne .compare_X_and_Q        ; if (!check) -> compare
+    inc rax                     ; else first++
+.compare_X_and_Q:
+    lea rdi, [r11 + r9]         ; rdi = j + block_move 
+    cmp rdi, r10                ; if (j + block_move == max_index) -> compare_check
+    je .compare_check
+    cmp qword[r14 + rdi*8], rax; compare R[j + block_move], new_block
+.compare_check:
+    jc .main_exit               ; if R smaller we can stop merging
+    ja .subtract                ; if R bigger we can start subtracting
+
+    cmp r11, 0                
+    je .subtract                ; if j == 0 -> subtract
+    dec r11                     ; else j-- and continue loop
+
+    jmp .compare_calculate_offset
+.subtract:
+; SUBSTRACT LOOP
+; r11 = j (from 0 -> block_count | CF = 1)
+; rax = Q[j]    (first)
+; rdx = Q[j - 1](second)
+; rsi = store cf value 
+    xor r11, r11                ; set j = 0
+    xor rax, rax                ; first = 0
+    xor rsi, rsi                ; rsi = 0 (CF equal to zero)
+
+.calc_first_and_second:
+    mov rdx, rax                ; second = first 
+    xor rax, rax                ; first = 0
+
+    cmp r11, r15                ; check j >= block_count 
+    jae .calc_block             ; if (j >= block_count) -> subtract_block
+
+    mov rax, [r13 + r11*8]      ; first = Q[j]
+.calc_block:
+    mov rdi, rax                ; set temp first block
+    shld rdi, rdx, cl           ; calc block to be substracted
+
+    ; solve edge case
+    test r11, r11               ; check j == 0
+    jnz .subtract_blocks         
+
+    cmp r12, 1                  ; check n - i + 1 == 1 (edge case)
+    jne .subtract_blocks         
+
+    inc rdi                     ; if n - i + 1 == 1 && j == 0 -> Q[j]++ 
+.subtract_blocks:
+    bt rsi, 0                   ; restore borrow flag from previous subtraction
+    lea rdx, [r11 + r9]         ; set temp j + block_move
+    ; R[j + block_move] - calculated_block
+    sbb [r14 + rdx * 8], rdi
+    setc sil                    ; remember CF value 
+.subtract_check:
+    inc r11                     ; j++
+    jc .calc_first_and_second   ; CF = 1 repeat
+
+    cmp r15, r11              
+    jae .calc_first_and_second  ; if(max >= j) -> loop again
+.bit_set:
+    ; if R > T set 2^{n - i} in Q
+    lea   r11, [r12 - 1]       ; r11 = n - i
+    mov   r10, r11             ; copy for the bit‑index
+    and   r10, 63              ; r10 = (n‑i) % 64
+    shr   r11, 6               ; r11 = (n‑i) / 64
+    bts   qword [r13 + r11*8], r10
+.main_exit:
+    cmp r8, rbx                 ; if i == n exit
+    je .exit
+    
+    ; now unset the previous bit from Q (set previously in main loop)
+    lea   r11, [r12 - 2]       ; r11 = n‑i‑1
+    mov   r10, r11             ; copy for the bit‑index
+    and   r10, 63              ; r10 = (n‑i‑1) % 64
+    shr   r11,   6             ; r11 = (n‑i‑1) / 64
+    btr   qword [r13 + r11*8], r10
+    jmp .main_loop             ; loop again 
+.exit:
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    ret 
