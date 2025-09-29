@@ -7,31 +7,31 @@
 - `typedef void (*transition_function_t)(uint64_t *next_state, uint64_t const *input, uint64_t const *state, size_t n, size_t s)`  
   Transition function type. Computes the next state from the current state and input signals. Programmer must provide this function.  
   Parameters:
-    next_state - pointer to bit array where the new state will be stored
-    input - pointer to bit array containing input signals
-    state - pointer to current state bits
-    n - number of input signals
-    s - number of state bits
+    - next_state - pointer to bit array where the new state will be stored
+    - input - pointer to bit array containing input signals
+    - state - pointer to current state bits
+    - n - number of input signals
+    - s - number of state bits
 
 - `typedef void (*output_function_t)(uint64_t *output, uint64_t const *state, size_t m, size_t s)`
   Output function type. Computes output signals based on the current state. Programmer must provide this function.  
   Parameters:
-    output - pointer to bit array where output signals will be stored
-    state - pointer to current state bits
-    m - number of output signals
-    s - number of state bits
+    - output - pointer to bit array where output signals will be stored
+    - state - pointer to current state bits
+    - m - number of output signals
+    - s - number of state bits
 
 ### Creation Functions
 
 - `moore_t * ma_create_full(size_t n, size_t m, size_t s, transition_function_t t, output_function_t y, uint64_t const *q)`
   Creates a full Moore machine with custom transition and output functions.  
   Parameters:
-    n - number of input signals
-    m - number of output signals
-    s - number of state bits
-    t - transition function
-    y - output function
-    q - pointer to initial state bit array
+    - n - number of input signals
+    - m - number of output signals
+    - s - number of state bits
+    - t - transition function
+    - y - output function
+    - q - pointer to initial state bit array
   Returns:
     pointer to the new machine
     NULL if parameters are invalid (m == 0, s == 0, or any pointer is NULL) or memory allocation fails (errno set to EINVAL or ENOMEM)
@@ -39,9 +39,9 @@
 - `moore_t * ma_create_simple(size_t n, size_t s, transition_function_t t)`  
   Creates a simple Moore machine where outputs equal the state, initial state is zero, and unused state bits are zero.  
   Parameters:
-    n - number of input signals
-    s - number of state bits (also number of outputs)
-    t - transition function
+    - n - number of input signals
+    - s - number of state bits (also number of outputs)
+    - t - transition function
   Returns:
     pointer to the new machine
     NULL if parameters are invalid or memory allocation fails, sets errno
@@ -91,8 +91,8 @@
 - `int ma_step(moore_t *at[], size_t num)`  
   Performs one synchronous computation step on an array of machines. All machines are updated in parallel.  
   Parameters:
-    at - array of pointers to Moore machines
-    num - size of the array
+    - at - array of pointers to Moore machines
+    - num - size of the array
   Returns:
     0 on success
     -1 on failure (NULL pointer, invalid array, num == 0, or memory allocation failure; errno set)
