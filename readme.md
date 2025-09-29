@@ -27,9 +27,9 @@ $⟨ X, Y, Q, t, y, q_0 ⟩$
   - input signals.  
 - The output function `y` then computes the **output signals** from the new state.  
 - In this library we consider **binary Moore machines**:
-  - Inputs: `n` one-bit signals → $X = \{0,1\}^{n}$  
-  - Outputs: `m` one-bit signals → $Y = \{0,1\}^m$  
-  - State: `s` bits → $Q = \{0,1\}^s$
+  - Inputs: `n` one-bit signals → $X = \\{0,1\\}^{n}$  
+  - Outputs: `m` one-bit signals → $Y = \\{0,1\\}^m$  
+  - State: `s` bits → $Q = \\{0,1\\}^s$
 
 Bit sequences are stored in arrays of `uint64_t`, with 64 bits per element (LSB-first).  
 Unused higher bits in the last word are ignored.
