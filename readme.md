@@ -15,7 +15,11 @@ Normally, a programmer would have to write a separate handler for each signal, f
 void handler2(int s)  { write(1, "2", 1); }
 void handler12(int s) { write(1, "12", 2); }
 ```
-**This project solves that problem by generating these handlers dynamically at runtime**, creating small executable trampolines that already contain the precomputed string and call only the async-signal-safe `write` function.
+**This project solves that problem by generating these handlers dynamically at runtime** using
+ ```c
+make_signal_handler(num)
+```
+creating small executable trampolines that already contain the precomputed string and call only the async-signal-safe `write` function.
 
 ## How to compile
 
